@@ -119,9 +119,8 @@ Reference material: session scratchpad `widowx-research.md` (stack research
   (zero-warnings property).
 - Default reset pose: the server-side neutral (WidowXClient.reset());
   optionally the OpenVLA eval start pose via config
-  `start_eef_pos`/`start_eef_quat` (defaults: the documented
-  `[0.3, -0.09, 0.26]` / `[0, -0.259, 0, -0.966]`), applied after reset
-  when `move_to_start=True` (default). Wire facts for that move
+  `start_eef_pos` (default: the documented `[0.3, -0.09, 0.26]`),
+  applied after reset when `move_to_start=True` (default). Wire facts for that move
   (verified against WidowXClient and the OpenVLA reference wrapper):
   `move()` accepts a 6-D xyz+rpy vector OR a 4x4 homogeneous matrix,
   never pos+quat, and the reset move MUST be `blocking=True` (the
