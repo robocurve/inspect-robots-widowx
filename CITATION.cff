@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Inspect Robots WidowX: OpenVLA and openpi adapters for WidowX 250S arms"
+authors:
+  - name: "Robocurve"
+type: software
+license: MIT
+repository-code: "https://github.com/robocurve/inspect-robots-widowx"
+version: "0.1.0"
