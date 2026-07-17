@@ -1,6 +1,6 @@
 # 0001: WidowX embodiment + OpenVLA/openpi policy plugin
 
-Status: draft (critique loop in progress)
+Status: accepted after two adversarial critique rounds plus fixes (2026-07-17)
 Issue: #1
 
 ## Goal
@@ -125,14 +125,22 @@ Reference material: session scratchpad `widowx-research.md` (stack research
   (verified against WidowXClient and the OpenVLA reference wrapper):
   `move()` accepts a 6-D xyz+rpy vector OR a 4x4 homogeneous matrix,
   never pos+quat, and the reset move MUST be `blocking=True` (the
-  reference wrapper marks this IMPORTANT). We pass a 4x4 matrix built by
-  a pure-numpy quaternion-to-rotation-matrix helper in packing.py (the
-  6-D path is avoided: the server interprets that rpy under a different
-  convention than the state euler). Implementation check: the OpenVLA
-  reference wrapper's hardcoded start matrix does NOT equal a naive
-  conversion of the documented quat under either xyzw/wxyz order; the
-  implementer must verify the produced matrix against the reference
-  wrapper's matrix and document which convention reproduces it.
+  reference wrapper marks this IMPORTANT). The 6-D path is avoided (the
+  server interprets that rpy under a different convention than the
+  state euler). The rotation is NOT derived from a quaternion: the
+  documented quat [0, -0.259, 0, -0.966] is a 30-degree y-rotation
+  under both orders, while the reference wrapper's hardcoded start
+  matrix rotation block is [[0.267, 0, 0.963], [0, 1, 0], [-0.963, 0,
+  0.267]] (about 74.5 degrees pitch): no quaternion convention maps one
+  to the other because the gap is the controller's internal
+  default-rotation compose. Therefore packing.py ships the reference
+  wrapper's rotation block as a named 4x4 constant
+  (`START_TRANSFORM`), the reset move substitutes `start_eef_pos` into
+  the translation column exactly as the wrapper does, and there is NO
+  start_eef_quat config field (an expert override is
+  `start_transform`, a full 16-element row-major 4x4, documented as
+  advanced). A packing test asserts the built default matrix equals
+  the reference fixture.
 
 ## Package layout
 
@@ -169,8 +177,9 @@ converters (the client takes the 7-vector verbatim).
   `control_hz=5.0`, `move_duration=0.2` (forwarded to the server env
   params; must equal `1/control_hz`, validated), `delta_low/delta_high`
   (defaults above; length 7 with the gripper slot [0,1]),
-  `move_to_start=True`, `start_eef_pos`, `start_eef_quat`,
-  `unattended=False`, `docs_extra=""` (no image_size field: the server's
+  `move_to_start=True`, `start_eef_pos`, `start_transform=None`
+  (advanced full-matrix override; default builds from START_TRANSFORM +
+  start_eef_pos), `unattended=False`, `docs_extra=""` (no image_size field: the server's
   pre-resized `image` key is an unused float-CHW observation we never
   consume; we read `full_image` only). `__post_init__` validates
   ranges/ordering/duration-consistency, and a test locks that
@@ -185,8 +194,11 @@ converters (the client takes the 7-vector verbatim).
   `resize_px=224`. Explicit PolicyConfig wiring; api_key never in
   asdict(policy.config) (franka pattern, tested).
 - Shared builders: `ACTION_SEMANTICS`, `action_box()` (from
-  delta_low/high), `observation_space()` (external_cam + eef_pose(8,)).
-  Both policies and the embodiment build from these.
+  delta_low/high), and `observation_space(include_state: bool)`: the
+  embodiment builds with `include_state=True` (external_cam +
+  eef_pose(7,)); BOTH policies build with `include_state=False`
+  (external_cam only), because they consume no state keys and declaring
+  one would contradict the locked no-state-keys compat test.
 
 ### embodiment.py
 
@@ -202,9 +214,14 @@ converters (the client takes the 7-vector verbatim).
   Status`, `step_action(action: np.ndarray, blocking: bool) -> Status`,
   `get_observation() -> Mapping | None` (server returns None until
   ready: the embodiment retries with injected sleep up to
-  `obs_timeout_s=10`, then raises), `stop() -> None`. The Status type is
-  a plugin-local IntEnum mirroring SUCCESS/other so fakes never import
-  widowx_envs.
+  `obs_timeout_s=10`, then raises), `stop() -> None`. The Status type is a plugin-local IntEnum mirroring ALL FOUR upstream
+  values exactly (upstream WidowXStatus is a plain class of bare ints:
+  NO_CONNECTION=0, SUCCESS=1, EXECUTION_FAILURE=2, NOT_INITIALIZED=3),
+  so fakes never import widowx_envs and fault messages can distinguish
+  server-down from init-skipped. Mechanics pinned: comparisons are by
+  VALUE (`code != Status.SUCCESS`), never identity (upstream returns
+  raw ints); fault rendering guards `Status(code)` with a fallback to
+  the raw value so an unknown int never raises inside the error path.
 - `_default_client_factory` (pragma'd): builds `WidowXClient(host, port)`
   through `_bridge.py`'s guided loader; env params carry
   `move_duration`, workspace defaults, and the camera topic left to the
@@ -278,14 +295,16 @@ converters (the client takes the 7-vector verbatim).
 ## pyproject
 
 - Base deps: `inspect-robots>=0.12`, `numpy>=1.24`, `requests>=2.31`,
-  `json-numpy>=2.0` (lazily imported; yam precedent). No extras for the
-  git-only stacks (guided installs).
+  `json-numpy>=2.0`, `pillow>=10.0` (all lazily imported; yam
+  precedent; pillow is used only by the default OpenVLA transport's
+  resize). No extras for the git-only stacks (guided installs).
 - dev extra: pytest, pytest-cov, ruff, mypy, pre-commit, numpy<2.5.
 - Entry points: embodiment `widowx = ...:WidowXEmbodiment`; policies
   `openvla = ...:OpenVLAPolicy`, `openpi = ...:OpenpiPolicy`. Console
   script `inspect-robots-widowx-preflight`.
-- mypy overrides: `requests.*`, `json_numpy.*`, `cv2.*`,
-  `openpi_client.*`, `widowx_envs.*`, `edgeml.*`.
+- mypy overrides: `requests.*`, `json_numpy.*`, `PIL.*`,
+  `openpi_client.*`, `widowx_envs.*`, `edgeml.*` (no cv2 override: no
+  plugin code imports cv2).
 - Everything else identical to franka (hatch-vcs, fancy readme, ruff D1,
   coverage 100 branch).
 
@@ -293,7 +312,7 @@ converters (the client takes the 7-vector verbatim).
 
 franka's skeleton: `quality`, `test` (ubuntu+macos x py3.11/3.12),
 `import-hygiene` (--no-deps + locked pins; assert `requests`,
-`json_numpy`, `cv2`, `widowx_envs`, `edgeml`, `openpi_client`,
+`json_numpy`, `PIL`, `widowx_envs`, `edgeml`, `openpi_client`,
 `websockets`, `torch` absent), `openpi-seam` (franka's
 signature-asserting job verbatim), `ci-ok` needing all four,
 `alert-red-main`; canary.yml + release.yml byte-copied. Ruleset already
@@ -301,15 +320,21 @@ active.
 
 ## Test plan (franka battery adapted; all seams injected)
 
-- test_packing.py: constants/labels/validate_dim/accessors.
+- test_packing.py: constants/labels/validate_dim/accessors;
+  START_TRANSFORM default matrix equals the reference-wrapper fixture
+  (rotation block byte-exact, translation from start_eef_pos).
 - test_config.py: from_kwargs rejection, tuple parsing, validation
   (duration-vs-hz consistency, delta bounds ordering, url rejection).
 - test_embodiment.py: inert init; lazy connect; reset flow (init ->
-  reset -> optional move-to-start with exact pose args -> wait_ready);
-  obs-None retry then timeout fault; clamp backstop (out-of-bounds and
-  NaN); blocking=False forwarded; pacing with injected clock; operator
-  success/failure; unattended; close idempotency + stop-on-error;
-  bind_task; docs labels; RUNTIME_REQUIREMENTS Mapping via conformance.
+  reset -> optional move-to-start asserted as a 4x4 matrix argument
+  with blocking=True -> wait_ready); each non-SUCCESS status code from
+  init/reset/move/step_action RAISES a RuntimeError naming the code
+  (never swallowed); obs-None retry then timeout fault; clamp backstop
+  (out-of-bounds and NaN); step_action blocking=False forwarded; pacing
+  with injected clock; operator success/failure; unattended; close
+  idempotency + stop-on-error; bind_task; docs labels;
+  RUNTIME_REQUIREMENTS Mapping via conformance;
+  check_embodiment(...).ok conformance lock.
 - test_policy.py: openvla payload keys byte-exact incl. unnorm_key;
   single-action chunk; shape/finiteness validation; gripper pass-through
   (asymmetric value, locks no-polarity-flip); openpi pass-through at 7-D;
