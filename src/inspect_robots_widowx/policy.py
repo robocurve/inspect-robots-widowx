@@ -170,6 +170,10 @@ class OpenVLAPolicy:
 class OpenpiPolicy:
     """Inspect Robots policy for openpi Bridge fine-tune websocket servers."""
 
+    RUNTIME_REQUIREMENTS: ClassVar[Mapping[str, str]] = {
+        "openpi_client": OPENPI_CLIENT_INSTALL_COMMAND,
+    }
+
     def __init__(
         self,
         config: OpenpiConfig | None = None,

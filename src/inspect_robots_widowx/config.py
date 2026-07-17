@@ -101,6 +101,7 @@ class WidowXConfig(_FromKwargs):
     port: int = 5556
     control_hz: float = 5.0
     move_duration: float = 0.2
+    start_move_duration_s: float = 0.8
     delta_low: tuple[float, ...] = DEFAULT_DELTA_LOW
     delta_high: tuple[float, ...] = DEFAULT_DELTA_HIGH
     move_to_start: bool = True
@@ -117,6 +118,7 @@ class WidowXConfig(_FromKwargs):
         _valid_port(self.port)
         _positive_finite("control_hz", self.control_hz)
         _positive_finite("move_duration", self.move_duration)
+        _positive_finite("start_move_duration_s", self.start_move_duration_s)
         _positive_finite("obs_timeout_s", self.obs_timeout_s)
         if not np.isclose(self.move_duration, 1.0 / self.control_hz, rtol=1e-9, atol=1e-12):
             raise ValueError("move_duration must equal 1/control_hz")

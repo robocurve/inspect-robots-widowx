@@ -195,7 +195,7 @@ class WidowXEmbodiment:
             )
             _require_success(
                 "move",
-                client.move(transform, duration=self._cfg.move_duration, blocking=True),
+                client.move(transform, duration=self._cfg.start_move_duration_s, blocking=True),
             )
         if not self._cfg.unattended:
             self._operator.wait_ready()

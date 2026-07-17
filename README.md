@@ -106,6 +106,13 @@ JPEG encode/decode round trip to approximate the Bridge evaluation pipeline.
 Openpi has no official Bridge checkpoint. The `openpi` entry point is for a
 bring-your-own community or local Bridge fine-tune served by openpi.
 
+> [!NOTE]
+> inspect-robots-franka also registers a policy named `openpi` (the DROID
+> client). With both packages installed, `--policy openpi` resolves to
+> whichever distribution the registry enumerates first; a mismatch fails
+> loudly at preflight with an action dimension error. Uninstall one package
+> or use the Python API to disambiguate.
+
 ## Preflight
 
 Preflight constructs metadata only. It does not connect to the robot or a
@@ -248,6 +255,7 @@ tracks support for Euler pose displacement guardrails. Declaring
 | `host` | `localhost` | BridgeData robot server host |
 | `port` | `5556` | ZMQ request port, with broadcast on port + 1 |
 | `control_hz` | `5.0` | Self-paced command rate |
+| `start_move_duration_s` | `0.8` | Duration of the blocking move to the start pose at reset |
 | `move_duration` | `0.2` | Server step duration, required to equal `1/control_hz` |
 | `delta_low` | translation -0.05, rotation -0.25, gripper 0 | Per-step hard lower bounds |
 | `delta_high` | translation 0.05, rotation 0.25, gripper 1 | Per-step hard upper bounds |

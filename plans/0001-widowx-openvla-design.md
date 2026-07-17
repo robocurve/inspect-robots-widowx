@@ -223,8 +223,13 @@ converters (the client takes the 7-vector verbatim).
   the raw value so an unknown int never raises inside the error path.
 - `_default_client_factory` (pragma'd): builds `WidowXClient(host, port)`
   through `_bridge.py`'s guided loader; env params carry
-  `move_duration`, workspace defaults, and the camera topic left to the
-  server's own config.
+  `move_duration`, workspace defaults, and `camera_topics` hardcoded to
+  the canonical `/blue/image_raw` (upstream init_robot iterates
+  camera_topics with no fallback, so omitting it would KeyError
+  server-side; a differently-named topic currently requires a fork, and
+  the README states that limitation). The blocking start move uses
+  `start_move_duration_s=0.8` (the reference wrapper's duration), not
+  the 0.2 s per-step `move_duration`.
 - `WidowXEmbodiment`: inert `__init__(config=None, *, client_factory=None,
   operator=None, poll_end=None, clock=None, sleep_fn=None, **flat)`;
   lazy connect at first `reset()`: init client, `client.reset()`,

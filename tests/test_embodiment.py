@@ -146,7 +146,7 @@ def test_reset_flow_uses_reference_4x4_blocking_move_then_operator() -> None:
     matrix, duration, blocking = client.moves[0]
     assert matrix.shape == (4, 4)
     assert np.array_equal(matrix, START_TRANSFORM)
-    assert (duration, blocking) == (0.2, True)
+    assert (duration, blocking) == (0.8, True)
     assert np.array_equal(observation.images["external_cam"], _raw_observation()["full_image"])
     assert observation.images["external_cam"].dtype == np.uint8
     assert np.array_equal(observation.state["eef_pose"], _raw_observation()["state"])
@@ -411,3 +411,20 @@ def test_close_without_connection_clears_bound_horizon() -> None:
     embodiment.bind_task(TaskEnvelope(name="task", max_steps=3))
     embodiment.close()
     assert embodiment._bound_max_steps is None
+
+
+def test_nondefault_move_duration_reaches_env_params_and_pacing() -> None:
+    client = _FakeClient()
+    config = WidowXConfig(unattended=True, control_hz=4.0, move_duration=0.25)
+    clock = _Clock()
+    embodiment = WidowXEmbodiment(
+        config,
+        client_factory=lambda _cfg: client,  # type: ignore[arg-type,return-value]
+        clock=clock,
+        sleep_fn=clock.sleep,
+    )
+    embodiment.reset(_scene())
+    assert client.env_params["move_duration"] == pytest.approx(0.25)
+    clock.now += 0.05
+    embodiment.step(Action(data=np.zeros(7)))
+    assert clock.sleeps[-1] == pytest.approx(0.25 - 0.05)
