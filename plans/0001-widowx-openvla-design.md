@@ -61,33 +61,56 @@ Reference material: session scratchpad `widowx-research.md` (stack research
 
 - `DIM_LABELS = ("dx", "dy", "dz", "droll", "dpitch", "dyaw", "gripper")`;
   `TOTAL_DIM=7`, `GRIPPER_IDX=6`, `STATE_KEY="eef_pose"`.
-- `ActionSemantics(control_mode="eef_delta_pose",
-  rotation_repr="euler_xyz", gripper="continuous", frame="base",
-  dim_labels=DIM_LABELS)`. Slots 0-2 are EEF displacement in metres, 3-5
-  are roll/pitch/yaw displacement in radians, slot 6 is the ABSOLUTE
-  gripper target in [0, 1] with 1 = open (BridgeData wire convention,
-  which happens to match the house convention: no polarity conversion
-  anywhere; a test locks that policies pass the gripper through
-  untouched). The absolute-gripper-inside-a-delta-action wrinkle is
-  documented in config.py and README: the framework's ActionSemantics has
-  no per-dim delta/absolute split, so the gripper slot's absoluteness is a
-  documented convention, exactly as BridgeData defines it.
+- `ActionSemantics(control_mode="eef_delta_pose", rotation_repr="none",
+  gripper="continuous", frame="base", dim_labels=DIM_LABELS)`.
+  **rotation_repr is "none" by deliberate decision**: the framework's
+  DeltaLimitApprover rejects any pose mode whose rotation_repr is not in
+  {none, rot6d} before bounds are consulted, which would make conformance
+  report the embodiment non-conformant (doctor error) and permanently
+  degrade CLI guardrails to clamp-only. Declaring "none" with the
+  droll/dpitch/dyaw dim_labels carrying the semantics is the yam
+  precedent (yam declares "none" for an eef mode containing a yaw dim),
+  keeps zero/zero compat (both our policies declare the identical
+  semantics), keeps DeltaLimitApprover constructible, and passes
+  conformance. The honest euler_xyz declaration is blocked upstream and
+  tracked as inspect-robots#143; when a release relaxes the approver for
+  displacement modes, widowx bumps its pin and declares euler_xyz. A
+  `check_embodiment(embodiment.info).ok` test locks conformance green.
+  Slots 0-2 are EEF displacement in metres, 3-5 are roll/pitch/yaw
+  displacement in radians, slot 6 is the ABSOLUTE gripper target in
+  [0, 1] with 1 = open (BridgeData wire convention, which matches the
+  house convention: no polarity conversion anywhere; a test locks that
+  policies pass the gripper through untouched). The
+  absolute-gripper-inside-a-delta-action wrinkle is documented in
+  config.py and README.
 - Action bounds: per-step displacement box `delta_low/high` (default
   +-0.05 m translation, +-0.25 rad rotation per step: BridgeData-typical
-  magnitudes, config-overridable) and gripper [0, 1]. Finite bounds keep
-  DeltaLimitApprover constructible. README notes the CLI's default
-  DeltaLimitApprover in displacement mode also clamps the absolute gripper
-  slot to a 0.05 step (20-step transitions) and gives the Python per-dim
-  `max_delta` snippet (franka's documented pattern).
+  magnitudes, config-overridable) and gripper [0, 1]. Guardrail facts
+  (verified against approver.py, README must state them exactly): in
+  DISPLACEMENT mode with no explicit max_delta, DeltaLimitApprover's
+  derived default is the box alone (adds nothing beyond ClampApprover);
+  there is no reference tracking, clamping is on the action value
+  itself. An explicit SCALAR max_delta intersects each dim's box with
+  [-s, +s], so `--max-action-delta 0.05` turns the gripper's [0, 1] box
+  into [0, 0.05]: **the gripper is pinned nearly shut forever, not
+  rate-limited**. The README safety section therefore (1) warns against
+  scalar --max-action-delta explicitly, and (2) gives the Python per-dim
+  snippet with gripper limit 1.0 (yam's exact solution).
 - Observation: camera `external_cam` (single over-the-shoulder RGB,
   640x480 native: the canonical Bridge eval view), state
-  `StateField(key="eef_pose", shape=(8,), unit="m+quat+normalized")` =
-  xyz + quaternion (xyzw, as the server reports) + gripper. Conformance's
-  exactly-one-proprio-field rule applies only to absolute control modes,
-  so an 8-D state field with a 7-D delta action is legal; the compat
-  zero/zero property only needs the policies to request no state keys the
-  embodiment lacks (OpenVLA and openpi Bridge fine-tunes are image+text:
-  they declare NO state keys, and a test locks that).
+  `StateField(key="eef_pose", shape=(7,), unit="m+rad+normalized")` =
+  xyz + euler rpy + gripper, exactly as the server reports it (verified:
+  the wire state is np.concatenate([xyz, euler, gripper]), shape (7,);
+  there is NO quaternion on this wire). Config.py documents that the
+  euler is measured RELATIVE to the controller's default rotation, not
+  absolute world orientation. CANONICAL_STATE_UNITS' eef_pose entry says
+  m+quat but is advisory only (nothing enforces it); we do not claim a
+  quat that is not there. Conformance's exactly-one-proprio-field rule
+  applies only to absolute control modes, so a 7-D state field with a
+  7-D delta action is legal; the compat zero/zero property only needs
+  the policies to request no state keys the embodiment lacks (OpenVLA
+  and openpi Bridge fine-tunes are image+text: they declare NO state
+  keys, and a test locks that).
 - `control_hz=5.0` (BridgeData convention). The WidowX server executes
   each action over `move_duration=0.2` s; `step()` calls
   `step_action(..., blocking=False)` then paces to the 5 Hz period with
@@ -97,8 +120,19 @@ Reference material: session scratchpad `widowx-research.md` (stack research
 - Default reset pose: the server-side neutral (WidowXClient.reset());
   optionally the OpenVLA eval start pose via config
   `start_eef_pos`/`start_eef_quat` (defaults: the documented
-  `[0.3, -0.09, 0.26]` / `[0, -0.259, 0, -0.966]`), applied with a `move`
-  call after reset when `move_to_start=True` (default).
+  `[0.3, -0.09, 0.26]` / `[0, -0.259, 0, -0.966]`), applied after reset
+  when `move_to_start=True` (default). Wire facts for that move
+  (verified against WidowXClient and the OpenVLA reference wrapper):
+  `move()` accepts a 6-D xyz+rpy vector OR a 4x4 homogeneous matrix,
+  never pos+quat, and the reset move MUST be `blocking=True` (the
+  reference wrapper marks this IMPORTANT). We pass a 4x4 matrix built by
+  a pure-numpy quaternion-to-rotation-matrix helper in packing.py (the
+  6-D path is avoided: the server interprets that rpy under a different
+  convention than the state euler). Implementation check: the OpenVLA
+  reference wrapper's hardcoded start matrix does NOT equal a naive
+  conversion of the documented quat under either xyzw/wxyz order; the
+  implementer must verify the produced matrix against the reference
+  wrapper's matrix and document which convention reproduces it.
 
 ## Package layout
 
@@ -135,9 +169,12 @@ converters (the client takes the 7-vector verbatim).
   `control_hz=5.0`, `move_duration=0.2` (forwarded to the server env
   params; must equal `1/control_hz`, validated), `delta_low/delta_high`
   (defaults above; length 7 with the gripper slot [0,1]),
-  `image_size=256` (server-side resize request), `move_to_start=True`,
-  `start_eef_pos`, `start_eef_quat`, `unattended=False`, `docs_extra=""`.
-  `__post_init__` validates ranges/ordering/duration-consistency.
+  `move_to_start=True`, `start_eef_pos`, `start_eef_quat`,
+  `unattended=False`, `docs_extra=""` (no image_size field: the server's
+  pre-resized `image` key is an unused float-CHW observation we never
+  consume; we read `full_image` only). `__post_init__` validates
+  ranges/ordering/duration-consistency, and a test locks that
+  `WidowXConfig()` constructs with pure defaults.
 - `OpenVLAConfig` (frozen): `server_url="http://127.0.0.1:8000"`,
   `endpoint="/act"`, `unnorm_key="bridge_orig"`, `timeout_s=30.0`,
   `name="openvla"`. `.url` property; `from_kwargs` rejects `url`.
@@ -153,14 +190,21 @@ converters (the client takes the 7-vector verbatim).
 
 ### embodiment.py
 
-- `Client` Protocol (runtime_checkable), injected via `client_factory`:
-  `init(env_params: Mapping) -> None`, `reset() -> None`,
-  `move(pose: np.ndarray, duration: float) -> None`,
-  `step_action(action: np.ndarray, blocking: bool) -> None`,
-  `get_observation() -> Mapping | None` (server returns None until ready:
-  the embodiment retries with injected sleep up to `obs_timeout_s=10`,
-  then raises EmbodimentFault-compatible RuntimeError),
-  `stop() -> None`.
+- `Client` Protocol (runtime_checkable), injected via `client_factory`.
+  WidowXClient methods return `WidowXStatus` codes and map a dead
+  connection to NO_CONNECTION instead of raising, so the protocol
+  declares the status return and the embodiment RAISES an
+  EmbodimentFault-compatible RuntimeError on any non-SUCCESS status from
+  init/reset/move/step_action (a silent non-SUCCESS means the arm did
+  not move while the eval keeps scoring: never swallow it):
+  `init(env_params: Mapping) -> Status`, `reset() -> Status`,
+  `move(pose_4x4: np.ndarray, duration: float, blocking: bool) ->
+  Status`, `step_action(action: np.ndarray, blocking: bool) -> Status`,
+  `get_observation() -> Mapping | None` (server returns None until
+  ready: the embodiment retries with injected sleep up to
+  `obs_timeout_s=10`, then raises), `stop() -> None`. The Status type is
+  a plugin-local IntEnum mirroring SUCCESS/other so fakes never import
+  widowx_envs.
 - `_default_client_factory` (pragma'd): builds `WidowXClient(host, port)`
   through `_bridge.py`'s guided loader; env params carry
   `move_duration`, workspace defaults, and the camera topic left to the
@@ -172,9 +216,9 @@ converters (the client takes the 7-vector verbatim).
   when unattended), first observation.
   - Observation adaptation: server obs dict -> Observation(images
     {"external_cam": full_image as uint8 HxWx3}, state {"eef_pose":
-    8-vec}); JPEG-compressed `full_image` is decoded by the client
-    library itself (verify at implementation; if bytes arrive, decode via
-    lazily imported cv2 and add cv2 to RUNTIME_REQUIREMENTS).
+    7-vec}). Verified: WidowXClient decodes the JPEG itself
+    (jpeg_to_mat) and full_image is populated unconditionally, so no
+    cv2 contingency exists and full_image arrives as a decoded array.
   - `step()`: `validate_dim` -> clamp to delta_low/high (hard backstop,
     independent of Approver; NaN rejected) -> `step_action(clamped,
     blocking=False)` -> pace to 1/control_hz -> observe -> `poll_end()` /
@@ -191,17 +235,24 @@ converters (the client takes the 7-vector verbatim).
 
 - `OpenVLAPolicy(config=None, *, post_fn=None, clock=None, **flat)`, entry
   point `openvla`. `act()`: require `external_cam` (helpful error; no
-  state keys consumed) -> payload `{"image": uint8 array (passed at
-  native size; the SERVER does its own resize/crop handling per OpenVLA
-  deploy conventions: verify at implementation whether client-side 256x256
-  resize is required and pin the answer in config docstrings; if
-  client-side resize is needed, lazy cv2 in the default transport only)
-  , "instruction": str, "unnorm_key": cfg.unnorm_key}` ->
+  state keys consumed) -> resize (verified fact: deploy.py does NO
+  resizing server-side, and the canonical Bridge eval resizes
+  client-side to 256x256 with lanczos + a JPEG encode/decode round-trip
+  to match the training distribution; sending 640x480 raw is a
+  distribution shift) -> payload `{"image": uint8 256x256x3,
+  "instruction": str, "unnorm_key": cfg.unnorm_key}` ->
   `post_fn(url, payload) -> 7-element array` -> validate shape/finiteness
   -> single-Action chunk, `ActionChunk(control_hz=5.0,
-  inference_latency_s=measured)`. `_default_post` (pragma'd):
-  `requests.post(json=json_numpy-encoded payload)` with the documented
-  double-encoding fallback from OpenVLA's deploy.py README.
+  inference_latency_s=measured)`. The resize lives in the DEFAULT
+  transport `_default_post` (pragma'd): PIL lanczos resize + in-memory
+  JPEG round-trip (approximates the reference tf.image lanczos3
+  pipeline; the approximation is documented in config.py), then
+  `requests.post` with json_numpy encoding and the documented
+  double-encoding fallback from OpenVLA's deploy.py README. Pillow is a
+  lazy transport-only import (mypy override, import-hygiene absent
+  list); custom post_fn owns its own preprocessing. Config:
+  `resize_px=256`, `jpeg_roundtrip=True` (opt-out for non-Bridge
+  fine-tunes).
 - `OpenpiPolicy`: franka's shape at 7-D: `infer_fn` seam, DROID-free
   pass-through (no integration, no flip), git-only client guidance,
   resize-with-pad in default transport.
