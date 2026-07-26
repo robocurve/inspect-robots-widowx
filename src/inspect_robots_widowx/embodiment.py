@@ -115,7 +115,7 @@ def _env_params(cfg: WidowXConfig) -> Mapping[str, Any]:
         "catch_environment_except": False,
         "start_state": [0.3, 0.0, 0.15, 0.0, 0.0, 0.0, 1.0],
         "skip_move_to_neutral": False,
-        "return_full_image": False,
+        "return_full_image": True,
         "camera_topics": [{"name": "/blue/image_raw"}],
     }
 
