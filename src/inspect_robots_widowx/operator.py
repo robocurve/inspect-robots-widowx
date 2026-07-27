@@ -42,11 +42,11 @@ def _drain_stdin() -> None:
 
     if not sys.stdin.isatty():
         return
-    if sys.platform == "win32":  # pragma: no cover - Windows TTY-bound
+    if sys.platform == "win32":
         import msvcrt
 
         while msvcrt.kbhit():
-            sys.stdin.readline()
+            msvcrt.getwch()
         return
     import select  # pragma: no cover - TTY-bound
 
@@ -63,10 +63,12 @@ def default_poll_end() -> bool:  # pragma: no cover - requires a real TTY
     if sys.platform == "win32":
         import msvcrt
 
-        if msvcrt.kbhit():
-            sys.stdin.readline()
-            return True
-        return False
+        pressed_enter = False
+        while msvcrt.kbhit():
+            ch = msvcrt.getwch()
+            if ch in ("\r", "\n"):
+                pressed_enter = True
+        return pressed_enter
     import select
 
     ready, _, _ = select.select([sys.stdin], [], [], 0)
@@ -74,4 +76,3 @@ def default_poll_end() -> bool:  # pragma: no cover - requires a real TTY
         return False
     sys.stdin.readline()
     return True
-
