@@ -42,6 +42,12 @@ def _drain_stdin() -> None:
 
     if not sys.stdin.isatty():
         return
+    if sys.platform == "win32":
+        import msvcrt
+
+        while msvcrt.kbhit():
+            msvcrt.getwch()
+        return
     import select  # pragma: no cover - TTY-bound
 
     while select.select([sys.stdin], [], [], 0)[0]:  # pragma: no cover - TTY-bound
@@ -50,11 +56,21 @@ def _drain_stdin() -> None:
 
 def default_poll_end() -> bool:  # pragma: no cover - requires a real TTY
     """Return whether an operator pressed Enter without blocking."""
-    import select
     import sys
 
     if not sys.stdin.isatty():
         return False
+    if sys.platform == "win32":
+        import msvcrt
+
+        pressed_enter = False
+        while msvcrt.kbhit():
+            ch = msvcrt.getwch()
+            if ch in ("\r", "\n"):
+                pressed_enter = True
+        return pressed_enter
+    import select
+
     ready, _, _ = select.select([sys.stdin], [], [], 0)
     if not ready:
         return False
